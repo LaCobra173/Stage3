@@ -1,7 +1,10 @@
 package ru.marat.javacore;
 
-import java.awt.List;
 import java.util.*;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 public class RealMap<K,V> implements Map<K,V> {
     private LinkedList<Entry<K,V>>[] buckets;
     private int capacity;
@@ -26,10 +29,9 @@ public class RealMap<K,V> implements Map<K,V> {
     public RealMap() {
         capacity = 16;
         size = 0;
-        buckets = new LinkedList[capacity];
-        for (int i = 0; i < capacity; i++) {
-            buckets[i] = new LinkedList<>();
-        }
+        buckets = IntStream.range(0, capacity)
+                .mapToObj(i -> new LinkedList<>())
+                .toArray(LinkedList[]::new);
     }
     private int hash(Object key) {
         return Math.abs(key.hashCode() % capacity);
@@ -49,117 +51,109 @@ public class RealMap<K,V> implements Map<K,V> {
     public boolean containsKey(Object key) {
         int index = hash(key);
         LinkedList<Entry<K, V>> bucket = buckets[index];
-        for (Entry<K, V> entry : bucket) {
-            if (entry.getKey().equals(key))
-                return true;
-        }
-        return false;
+        return bucket.stream().
+                anyMatch(entry -> entry.getKey().equals(key));
     }
 
     @Override
     public boolean containsValue(Object value) {
-        for (LinkedList<Entry<K, V>> bucket : buckets) {
-            for (Entry<K, V> entry : bucket) {
-                if (entry.getValue().equals(value))
-                    return true;
-            }
-        }
-        return false;
+        return Arrays.stream(buckets)
+                .flatMap(Collection::stream)
+                .anyMatch(entry -> entry.getValue().equals(value));
     }
 
     @Override
     public V get(Object key) {
         int index = hash(key);
         LinkedList<Entry<K, V>> bucket = buckets[index];
-        for (Entry<K, V> entry : bucket) {
-            if (entry.getKey().equals(key)) {
-                return entry.getValue();
-            }
-        }
-        return null;
+        Optional<V> element = bucket.stream()
+                .filter(kvEntry -> kvEntry.getKey().equals(key))
+                .map(Entry::getValue)
+                .findAny();
+        return element.isPresent() ? element.get() : null;
     }
 
     @Override
     public V put(K key, V value) {
         int index = hash(key);
         LinkedList<Entry<K, V>> bucket = buckets[index];
-        V oldValue = null;
-        for (Entry<K, V> entry : bucket) {
-            if (entry.getKey().equals(key)) {
-                oldValue = entry.getValue();
-                entry.setValue(value);
-            }
-        }
-        bucket.add(new Entry<>(key,value));
-        size++;
 
-        return oldValue;
+        Optional<V> oldValue = bucket.stream()
+                .filter(entry -> entry.getKey().equals(key)).findFirst()
+                .map(e -> {
+                    V val = e.getValue();
+                    e.setValue(value);
+                    return val;
+                });
+
+        if (oldValue.isEmpty()) {
+            bucket.add(new Entry<>(key, value));
+            size++;
+        }
+
+        return oldValue.isEmpty() ? null : oldValue.get();
     }
 
     @Override
     public V remove(Object key) {
         int index = hash((K)key);
-        V oldValue = null;
         LinkedList<Entry<K, V>> bucket = buckets[index];
-        for (Entry<K, V> entry : bucket) {
-            if (entry.getKey().equals(key)) {
-                oldValue = entry.getValue();
-                bucket.remove(entry);
-                size--;
-            }
-        }
 
-        return oldValue;
+        LinkedList<Entry<K, V>> sortedLinkedList = bucket.stream()
+                .filter(f -> !f.getKey().equals(key))
+                .collect(Collectors.toCollection(LinkedList::new));
+
+        Optional<V> oldValue = bucket.stream()
+                .filter(e -> e.getKey().equals(key))
+                .findFirst()
+                .map(Entry::getValue);
+
+        if (oldValue.isEmpty()) {
+            return null;
+        }
+        else {
+            buckets[index] = sortedLinkedList;
+            size--;
+            return oldValue.get();
+        }
     }
 
     @Override
     public void putAll(Map<? extends K, ? extends V> m) {
-        for (Map.Entry<? extends K, ? extends V> map : m.entrySet()) {
-            K key = map.getKey();
-            V value = map.getValue();
-            put(key, value);
-        }
+        m.entrySet().stream()
+                .forEach((Consumer<Map.Entry<? extends K, ? extends V>>) entry -> put(entry.getKey(), entry.getValue()));
     }
 
     @Override
     public void clear() {
         size = 0;
-        for (int i = 0; i < capacity; i++) {
-            buckets[i] = null;
-        }
+        buckets = new LinkedList[capacity];
     }
 
     @Override
     public Set<K> keySet() {
-        Set<K> setCollection = new HashSet<>();
-        for (LinkedList<Entry<K, V>> bucket : buckets) {
-            for (Entry<K, V> entry : bucket) {
-                setCollection.add(entry.getKey());
-            }
-        }
-        return setCollection;
+        return Arrays.stream(buckets)
+                .flatMap(Collection::stream)
+                .map(Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public Collection<V> values() {
-        Collection<V> collection = new HashSet<>();
-        for (LinkedList<Entry<K, V>> bucket : buckets) {
-            for (Entry<K, V> entry : bucket) {
-                collection.add(entry.getValue());
-            }
-        }
-        return collection;
+        return Arrays.stream(buckets)
+                .flatMap(Collection::stream)
+                .map(Entry::getValue)
+                .collect(Collectors.toSet());
     }
 
     @Override
     public Set<Map.Entry<K, V>> entrySet() {
-        Set<Map.Entry<K, V>> setCollection = new HashSet<>();
-        for (LinkedList<Entry<K, V>> bucket : buckets) {
-            for (Entry<K, V> entry : bucket) {
-                setCollection.add((Map.Entry<K, V>) entry);
-            }
-        }
-        return setCollection;
+        return Arrays.stream(buckets)
+                .flatMap(Collection::stream)
+                .map(m -> {
+                    return Map.entry(m.getKey(), m.getValue());
+                })
+                .collect(Collectors.toSet());
     }
 
     @Override
